@@ -9,6 +9,8 @@ terraform {
 provider "aws" {
   region = "${var.region}"
 
+  //access keys
+
   default_tags {
     tags = var.default_tags
   }
