@@ -1,33 +1,15 @@
-
-###### ECS Service
-# configure aws provider
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 3.0"  # Ensure this version matches the one compatible with your configurations
-    }
-  }
-}
-provider "aws" {
-  region = "ap-south-1"
-
-}
-
-#########################
-
 # Security Groups
 resource "aws_security_group" "alb_security_group" {
-  name        = "DR_CMS_BACKEND_ALB_SG"
-  description = "internal_api_backend_alb_sg, allows HTTP 80, HTTPS 443"
-  vpc_id      = "" //var VPC ID
+  name        = "${var.app_name}_alb_security_group"
+  description = "${var.app_name} ALB security group"
+  vpc_id      = "${var.vpc_id}"
 
   ingress {
     description      = "http access"
     from_port        = 80
     to_port          = 80
     protocol         = "TCP"
-    cidr_blocks      = ["10.1.0.0/16"]
+    cidr_blocks      = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -35,32 +17,31 @@ resource "aws_security_group" "alb_security_group" {
     from_port        = 443
     to_port          = 443
     protocol         = "TCP"
-    cidr_blocks      = ["10.1.0.0/16"]
+    cidr_blocks      = ["0.0.0.0/0"]
   }
 
   egress {
+    description      = "all traffic"
     from_port        = 0
     to_port          = 0
     protocol         = -1
     cidr_blocks      = ["0.0.0.0/0"]
   }
 
-  tags   = {
-
-  }
+  tags = var.default_tags
 }
 
 resource "aws_security_group" "ecs_service_security_group" {
-  name        = "DR_ECS_CMS_BACKEND_SG"
-  description = "internal_api_backend_alb_sg, allows HTTP 80, HTTPS 443"
-  vpc_id      = "" //var VPC ID
+  name        = "${var.app_name}_ecs_service_sg"
+  description = "${var.app_name} ecs security group"
+  vpc_id      = "${var.vpc_id}"
 
   ingress {
     description      = "http access"
     from_port        = 80
     to_port          = 80
     protocol         = "TCP"
-    cidr_blocks      = ["10.1.0.0/16"]
+    cidr_blocks      = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -68,40 +49,40 @@ resource "aws_security_group" "ecs_service_security_group" {
     from_port        = 443
     to_port          = 443
     protocol         = "TCP"
-    cidr_blocks      = ["10.1.0.0/16"]
+    cidr_blocks      = ["0.0.0.0/0"]
   }
 
   egress {
+    description      = "all traffic"
     from_port        = 0
     to_port          = 0
     protocol         = -1
     cidr_blocks      = ["0.0.0.0/0"]
   }
 
-  tags   = {
-
-  }
+  tags = var.default_tags
 }
 
-
 ## ALB
-resource "aws_lb" "example_alb" {
-  name               = "DRTestALB"
+resource "aws_lb" "app_alb" {
+  name               = "${var.app_name}-alb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_security_group.id]  # Replace with your security group
-  subnets            = ["subnet-0157542b2c44e7f0a", "subnet-026d24ff8339f945c"] # Replace with your subnets
+  subnets            = ["${var.public_subnet_id_1}", "${var.public_subnet_id_2}"] # Replace with your subnets
 
   enable_deletion_protection = false
+
+  tags = var.default_tags
 }
 
 
 # Target Group
-resource "aws_lb_target_group" "my_target_group" {
-  name     = "DR-Test-Backend-TG"
+resource "aws_lb_target_group" "target_group" {
+  name     = "${app_name}_tg"
   port     = 80
   protocol = "HTTP"
-  vpc_id   = "vpc-0749076e30328d90f" //Change VPC ID
+  vpc_id   = "${var.vpc_id}"
   target_type = "ip"
 
   health_check {
@@ -122,29 +103,29 @@ resource "aws_lb_target_group" "my_target_group" {
     cookie_duration = 86400
   }
 
-  tags = {
-    # Add any tags here if necessary
-  }
+  tags = var.default_tags
 }
 
 # Listeners
-resource "aws_lb_listener" "example_listener" {
-  load_balancer_arn = aws_lb.example_alb.arn
+resource "aws_lb_listener" "listener" {
+  load_balancer_arn = aws_lb.app_alb.arn
   port              = 80
   protocol          = "HTTP"
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.my_target_group.arn
+    target_group_arn = aws_lb_target_group.target_group.arn
   }
+
+  tags = var.default_tags
 }
 
 
 ## ECS Service
-resource "aws_ecs_service" "new_example_service" {
-  name                               = "DRTestECSService"
-  cluster                            = "DRTestCluster"
-  task_definition                    = "arn:aws:ecs:ap-south-1:365909855731:task-definition/DRTestTaskDefinition:3"
+resource "aws_ecs_service" "ecs_service" {
+  name                               = "${var.app_name}_service"
+  cluster                            = "${var.ecs_cluster_name}"
+  task_definition                    = "${var.ecs_task_definition_arn}"
   desired_count                      = 1
   # launch_type                        = "FARGATE"
   scheduling_strategy                = "REPLICA"
@@ -166,13 +147,13 @@ resource "aws_ecs_service" "new_example_service" {
 
   network_configuration {
     assign_public_ip = false
-    subnets          = ["subnet-0947a24e67db7f9c1", "subnet-0cbfcc3717d0cc690"] //var subnet id
+    subnets          = ["${var.private_subnet_id_1}", "${var.private_subnet_id_2}"]
     security_groups  = [aws_security_group.ecs_service_security_group.id]
   }
 
   load_balancer {
-    target_group_arn = aws_lb_target_group.my_target_group.arn
-    container_name   = "dr-pg-test-backend"
+    target_group_arn = aws_lb_target_group.target_group.arn
+    container_name   = "${var.app_name}-task"
     container_port   = 80
   }
 
@@ -181,6 +162,8 @@ resource "aws_ecs_service" "new_example_service" {
   health_check_grace_period_seconds   = 0
   deployment_maximum_percent          = 200
   deployment_minimum_healthy_percent  = 50
+
+  tags = var.default_tags
 
 }
 

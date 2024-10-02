@@ -1,19 +1,6 @@
-# configure aws provider
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 3.0"  # Ensure this version matches the one compatible with your configurations
-    }
-  }
-}
-provider "aws" {
-  region = "ap-south-1"
-}
-
 # IAM role creation
 resource "aws_iam_role" "ecs_task_execution_role" {
-  name               = "drEcsTaskExecutionRole"
+  name               = "${var.app_name}"
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
     Statement = [
@@ -26,7 +13,7 @@ resource "aws_iam_role" "ecs_task_execution_role" {
       }
     ]
   })
-  description            = "IAM role for ECS task DR TEST execution."
+  description            = "IAM role for ECS task execution."
   max_session_duration   = 3600
   force_detach_policies  = false
   path                   = "/"
@@ -42,7 +29,7 @@ resource "aws_iam_role_policy" "secrets_access_policy" {
       {
         Action   = ["secretsmanager:GetSecretValue"],
         Effect   = "Allow",
-        Resource = "arn:aws:secretsmanager:us-east-1:365909855731:secret:_ECS_secrets"
+        Resource = "*"
       }
     ]
   })
@@ -87,36 +74,38 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
 
 
 # ECS task definition
-resource "aws_ecs_task_definition" "example_DR_task" {
-  family                   = "DRTestTaskDefinition"
+resource "aws_ecs_task_definition" "cms_backend_task" {
+  family                   = "${app_name}"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "512"
-  memory                   = "3072"
+  cpu                      = "${var.cpu}"
+  memory                   = "${var.memory}"
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_execution_role.arn
 
   container_definitions = <<DEFINITION
 [{
-  "name": "dr-pg-test-backend",
-  "image": "365909855731.dkr.ecr.ap-south-1.amazonaws.com/dr-pg-test-backend:latest", 
+  "name": "${var.app_name}-task",
+  "image": "${var.ecr_repo}", 
   "essential": true,
   "portMappings": [
     {
-      "containerPort": 80,
-      "hostPort": 80,
+      "containerPort": ${var.container_port},
+      "hostPort": ${var.host_port},
       "protocol": "tcp"
     }
   ],
   "logConfiguration": {
     "logDriver": "awslogs",
     "options": {
-      "awslogs-group": "/ecs/drtest",
-      "awslogs-region": "ap-south-1",
+      "awslogs-group": "/ecs/${var.app_name}",
+      "awslogs-region": "${var.region}",
       "awslogs-stream-prefix": "ecs",
       "awslogs-create-group": "true"
     }
   }
 }]
 DEFINITION
+
+tags = var.default_tags
 }
